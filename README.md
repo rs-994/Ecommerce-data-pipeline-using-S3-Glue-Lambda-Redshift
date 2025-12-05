@@ -8,7 +8,7 @@ validate, and upsert data into Amazon Redshift for analytical purposes.
 
 
 
-# ● Mock Data Generation- script attached
+## ● Mock Data Generation- script attached
 ○ Transaction Data: Generate daily transaction files in CSV format, stored using
 the following hive-style partitioning in S3:
  <img width="975" height="303" alt="image" src="https://github.com/user-attachments/assets/67f4d6ca-c8a7-4eac-a0ed-c1e6562aed10" />
@@ -27,13 +27,13 @@ the following hive-style partitioning in S3:
  
  
 
-# ● Data Ingestion and Transformation with AWS Glue
-# ○ Event-Driven Ingestion: Configure an AWS Lambda function to trigger AWS Glue jobs upon detecting new files in the S3 transactions folder.
+## ● Data Ingestion and Transformation with AWS Glue
+### ○ Event-Driven Ingestion: Configure an AWS Lambda function to trigger AWS Glue jobs upon detecting new files in the S3 transactions folder.
 
 <img width="975" height="428" alt="image" src="https://github.com/user-attachments/assets/cc99b3d6-95ee-4b15-8de8-2a6aeb96cff7" />
 
  
-# ● Data Transformation and Validation using Glue ETL
+## ● Data Transformation and Validation using Glue ETL
 
 Establish Glue connection to Redshift by creating VPC endpoint
  
@@ -42,16 +42,16 @@ Establish Glue connection to Redshift by creating VPC endpoint
 
 
 
-# ○ Join Operations: Enrich transactional data by joining with dim_products and dim_customers based on product_id and customer_id.
-# ○ Data Validation: Include validation logic in the Glue job to filter out transactions with invalid customer_id or product_id (e.g., missing in dimension tables).
-# ○ Additional Transformations: Calculate the total transaction amount (quantity *price) and categorize transactions into different classes based on the amount (e.g., "Small", "Medium", "Large").
-# ○ Upsert Operation in Amazon Redshift
+## ○ Join Operations: Enrich transactional data by joining with dim_products and dim_customers based on product_id and customer_id.
+## ○ Data Validation: Include validation logic in the Glue job to filter out transactions with invalid customer_id or product_id (e.g., missing in dimension tables).
+## ○ Additional Transformations: Calculate the total transaction amount (quantity *price) and categorize transactions into different classes based on the amount (e.g., "Small", "Medium", "Large").
+## ○ Upsert Operation in Amazon Redshift
  ○ Design the Glue job to perform an upsert operation into the fact_transactions
 table in Redshift, using transaction_id as the key. Consider transaction date and
 status when determining if an existing record should be updated.
  <img width="975" height="472" alt="image" src="https://github.com/user-attachments/assets/f3fe48ab-8038-4602-b6d2-7412057b3800" />
 
-# Additional steps 
+## Additional steps 
 Add glue crawler info- add crawlers for both source and target to get their schema
 Security group of in redshift has inbound rule open
 S3 endpoint in VPC-In addition to s3 endpoint- u should also try setting up cloudwatch endpoint and glue endpoint in redshift vpc
