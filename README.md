@@ -52,11 +52,15 @@ status when determining if an existing record should be updated.
  <img width="975" height="472" alt="image" src="https://github.com/user-attachments/assets/f3fe48ab-8038-4602-b6d2-7412057b3800" />
 
 ## Additional steps 
-Add glue crawler info- add crawlers for both source and target to get their schema
-Security group of in redshift has inbound rule open
-S3 endpoint in VPC-In addition to s3 endpoint- u should also try setting up cloudwatch endpoint and glue endpoint in redshift vpc
-Turn on aws eventbridge option in S3, TO SEND S3 NOTIFICATIONS TO EVENTBRIDGE
-While creating crawler for redshift or target table, choose JDBC as data source and then give redshift glue connection name .
+1.Add glue crawler info- add crawlers for both source and target to get their schema
+
+2. Security group of in redshift has inbound rule open
+3. 
+3.S3 endpoint in VPC-In addition to s3 endpoint- u should also try setting up cloudwatch endpoint and glue endpoint in redshift vpc
+
+4.Turn on aws eventbridge option in S3, TO SEND S3 NOTIFICATIONS TO EVENTBRIDGE
+
+5. While creating crawler for redshift or target table, choose JDBC as data source and then give redshift glue connection name .
 
  
 
