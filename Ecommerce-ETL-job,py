@@ -1,0 +1,182 @@
+import sys
+from awsglue.transforms import *
+from awsglue.utils import getResolvedOptions
+from pyspark.context import SparkContext
+from awsglue.context import GlueContext
+from awsglue.job import Job
+from pyspark.sql import functions as F
+from awsglue.dynamicframe import DynamicFrame
+
+# Get job parameters
+args = getResolvedOptions(sys.argv, ['JOB_NAME'])
+sc = SparkContext()
+glueContext = GlueContext(sc)
+spark = glueContext.spark_session
+job = Job(glueContext)
+job.init(args['JOB_NAME'], args)
+
+print("Starting ETL job...")
+
+# 1. READ TRANSACTION DATA FROM S3
+print("Step 1: Reading transaction data from S3...")
+transactions_dyf = glueContext.create_dynamic_frame.from_catalog(
+    database="ecommerce-metadata-db",
+    table_name="transactions"
+)
+transactions_df = transactions_dyf.toDF()
+print(f"Loaded {transactions_df.count()} transaction records")
+
+# 2. READ DIMENSION TABLES FROM REDSHIFT
+print("Step 2: Reading dimension tables from Redshift...")
+
+# redshift_connection_options = {
+#     "connectionName": "Jdbc connection",  # must match EXACT Glue connection name
+#     "aws_iam_role": "arn:aws:iam::646047875925:role/service-role/AmazonRedshift-CommandsAccessRole-20250830T181322",
+#     "redshiftTmpDir": "s3://redshift-temp-ecom/temp_dir/"
+# }
+redshift_connection_options = {
+    "url": "jdbc:redshift://redshift-glue-endpoint-endpoint*****.redshift-serverless.amazonaws.com:5439/dev",  
+    "user": "****",                  
+    "password": "****",
+    "aws_iam_role": "arn:aws:iam::/service-role/AmazonRedshift-CommandsAccessRole-20250830T181322",
+    "redshiftTmpDir": "s3://redshift-temp-ecom/temp_dir/"
+}    
+
+# Customers
+customers_dyf = glueContext.create_dynamic_frame.from_options(
+    connection_type="redshift",
+    connection_options={
+        **redshift_connection_options,
+        "dbtable": "public.dim_customers"
+    }
+)
+customers_df = customers_dyf.toDF()
+print(f"Loaded {customers_df.count()} customer records")
+
+# Products
+products_dyf = glueContext.create_dynamic_frame.from_options(
+    connection_type="redshift",
+    connection_options={
+        **redshift_connection_options,
+        "dbtable": "public.dim_products"
+    }
+)
+products_df = products_dyf.toDF()
+print(f"Loaded {products_df.count()} product records")
+
+# 3. VALIDATION
+print("Step 3: Validating data...")
+initial_count = transactions_df.count()
+
+# Instead of collecting IDs, rely on joins for validation
+validated_transactions_df = transactions_df.filter(
+    (F.col("quantity") > 0) & 
+    (F.col("price") > 0)
+)
+
+final_count = validated_transactions_df.count()
+rejected_count = initial_count - final_count
+print(f"Validation complete: {final_count} valid, {rejected_count} rejected transactions")
+
+# 4. JOINS
+print("Step 4: Joining with dimension tables...")
+
+enriched_df = (
+    validated_transactions_df
+    .join(customers_df.select("customer_id", "first_name", "last_name", "membership_level"),
+          on="customer_id", how="inner")
+    .join(products_df.select("product_id", "product_name", "category"),
+          on="product_id", how="inner")
+)
+
+print(f"Enriched {enriched_df.count()} transactions with dimension data")
+
+# 5. TRANSFORMATIONS
+print("Step 5: Applying transformations...")
+
+enriched_df = (
+    enriched_df
+    .withColumn("total_amount", F.col("quantity") * F.col("price"))
+    .withColumn("transaction_class",
+                F.when(F.col("total_amount") < 50, "Small")
+                 .when(F.col("total_amount") < 200, "Medium")
+                 .otherwise("Large"))
+    .withColumn("created_at", F.current_timestamp())
+    .withColumn("updated_at", F.current_timestamp())
+)
+
+final_df = enriched_df.select(
+    "transaction_id",
+    "customer_id",
+    "product_id",
+    "quantity",
+    "price",
+    "total_amount",
+    "transaction_date",
+    "payment_type",
+    "status",
+    "transaction_class",
+    "created_at",
+    "updated_at"
+)
+
+print(f"Final dataset ready with {final_df.count()} records")
+
+# 6. UPSERT TO REDSHIFT
+print("Step 6: Performing upsert to Redshift...")
+
+upsert_options = {
+    **redshift_connection_options,
+    "dbtable": "public.fact_transactions_staging",
+    "preactions": """
+        create table if not exists public.fact_transactions_staging (like public.fact_transactions);
+        truncate table public.fact_transactions_staging;
+    """,
+    "postactions": """
+        merge into public.fact_transactions t
+        using public.fact_transactions_staging s
+        on t.transaction_id = s.transaction_id
+        when matched then update set
+            customer_id = s.customer_id,
+            product_id = s.product_id,
+            quantity = s.quantity,
+            price = s.price,
+            total_amount = s.total_amount,
+            transaction_date = s.transaction_date,
+            payment_type = s.payment_type,
+            status = s.status,
+            transaction_class = s.transaction_class,
+            updated_at = s.updated_at
+        when not matched then insert (
+            transaction_id, customer_id, product_id, quantity, price,
+            total_amount, transaction_date, payment_type, status,
+            transaction_class, created_at, updated_at
+        )
+        values (
+            s.transaction_id, s.customer_id, s.product_id, s.quantity, s.price,
+            s.total_amount, s.transaction_date, s.payment_type, s.status,
+            s.transaction_class, s.created_at, s.updated_at
+        );
+    """
+}
+
+final_dyf = DynamicFrame.fromDF(final_df, glueContext, "final_transactions")
+
+glueContext.write_dynamic_frame.from_options(
+    frame=final_dyf,
+    connection_type="redshift",
+    connection_options=upsert_options
+)
+
+print("ETL job completed successfully!")
+
+# SUMMARY
+print("\n=== JOB SUMMARY ===")
+print(f"Records processed: {initial_count}")
+print(f"Records validated: {final_count}")
+print(f"Records rejected: {rejected_count}")
+
+print("\nTransaction class distribution:")
+final_df.groupBy("transaction_class").count().show()
+
+job.commit()
